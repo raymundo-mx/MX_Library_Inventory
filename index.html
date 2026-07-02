@@ -2716,16 +2716,9 @@ function _labelStartGrid(){
   return `<div class="lsp-grid" style="grid-template-columns:repeat(${t.cols},26px)">${cells}</div>`;
 }
 
-function _buildLabelSheet(){
+/* All template-dependent CSS in one place (dimensions, fonts, mono, print). */
+function _computeLabelCSS(){
   const t = _tpl();
-  const n = _labelsPerSheet();
-  if(_labelStartPos > n) _labelStartPos = 1;
-  const list  = _labelSheetList;
-  const skip  = _labelStartPos - 1;
-  const blanks = Array.from({length:skip}, () => `<div class="lbl lbl-blank"></div>`).join('');
-  const labels = list.map(_labelCell).join('');
-
-  // Per-size sizing
   const big = t.size === 'big', tiny = t.size === 'tiny';
   const monoCss = big
     ? `#report-scroll .lbl-mono{position:absolute;right:0.18in;bottom:0.16in;height:0.5in;opacity:.9}`
@@ -2740,7 +2733,6 @@ function _buildLabelSheet(){
   const bcH     = big ? '30px' : (tiny ? '11px' : '16px');
   const lblPad  = big ? '0.14in 0.18in' : (tiny ? '0.03in 0.06in' : '0.08in 0.12in');
   const titleMax= big ? '40px' : '20px';
-  // reserve right room so text doesn't run under the corner monogram
   const padRight= big ? '1.0in' : (tiny ? '0.20in' : '0.62in');
 
   const tinyCss = tiny ? `
@@ -2750,7 +2742,7 @@ function _buildLabelSheet(){
     #report-scroll .lbl-tiny .lbl-id{font-size:${idSz}}
   ` : '';
 
-  const css = `
+  return `
     #report-scroll .rwrap{padding:14px;background:#e8e8e8}
     #report-scroll .ctl{background:#fff;border:1px solid #e0d6bd;border-radius:8px;padding:12px 14px;margin:0 auto 14px;max-width:8.5in;display:flex;flex-wrap:wrap;align-items:center;gap:14px}
     #report-scroll .ctl label{font:600 12px 'Source Sans 3';color:#6b4f12;text-transform:uppercase;letter-spacing:.5px}
@@ -2782,6 +2774,18 @@ function _buildLabelSheet(){
       body.printing-report #report-scroll .sheet{margin:0;box-shadow:none;page-break-after:always}
       @page{size:letter;margin:0}
     }`;
+}
+
+function _buildLabelSheet(){
+  const t = _tpl();
+  const n = _labelsPerSheet();
+  if(_labelStartPos > n) _labelStartPos = 1;
+  const list  = _labelSheetList;
+  const skip  = _labelStartPos - 1;
+  const blanks = Array.from({length:skip}, () => `<div class="lbl lbl-blank"></div>`).join('');
+  const labels = list.map(_labelCell).join('');
+
+  const css = _computeLabelCSS();
 
   // template dropdown
   const tplOpts = Object.keys(LABEL_TEMPLATES).map(k =>
@@ -2794,18 +2798,37 @@ function _buildLabelSheet(){
     opts += `<option value="${p}"${p===_labelStartPos?' selected':''}>Position ${p}  (row ${r}, col ${c})</option>`;
   }
 
-  return `<style>${css}</style>
+  return `<style id="label-style">${css}</style>
     <div class="ctl no-print">
       <label for="label-tpl-sel">Label</label>
       <select id="label-tpl-sel" onchange="setLabelTemplate(this.value)">${tplOpts}</select>
       <label for="label-start-sel">Start at</label>
       <select id="label-start-sel" onchange="setLabelStart(parseInt(this.value))">${opts}</select>
-      ${_labelStartGrid()}
-      <span class="ctl-note">Skipping the first ${skip} label${skip!==1?'s':''} \u2014 use this to print onto a partially-used sheet whose first labels are already peeled. 5160 (laser) &amp; 8160 (inkjet) are the same 2.625\u00d71"; 5163 is a larger 4\u00d72"; 5167/8167 is the small \u00bd\u00d71.75" (80/sheet).</span>
+      <span id="label-start-grid">${_labelStartGrid()}</span>
+      <span class="ctl-note" id="label-note">${_labelNote(skip)}</span>
     </div>
-    <div class="hint">${t.name} \u00b7 ${n} labels/sheet (${t.w}\u00d7${t.h}\") \u00b7 ${list.length} label${list.length!==1?'s':''}, starting at position ${_labelStartPos} \u00b7 Print at 100% scale, \u201cActual size\u201d / no fit-to-page</div>
-    <div class="sheet">${blanks}${labels}</div>`;
+    <div class="hint" id="label-hint">${_labelHint()}</div>
+    <div class="sheet" id="label-sheet">${blanks}${labels}</div>`;
 }
+
+function _labelNote(skip){
+  return `Skipping the first ${skip} label${skip!==1?'s':''} \u2014 use this to print onto a partially-used sheet whose first labels are already peeled. 5160 (laser) &amp; 8160 (inkjet) are the same 2.625\u00d71"; 5163 is a larger 4\u00d72"; 5167/8167 is the small \u00bd\u00d71.75" (80/sheet).`;
+}
+function _labelHint(){
+  const t = _tpl(), n = _labelsPerSheet();
+  return `${t.name} \u00b7 ${n} labels/sheet (${t.w}\u00d7${t.h}") \u00b7 ${_labelSheetList.length} label${_labelSheetList.length!==1?'s':''}, starting at position ${_labelStartPos} \u00b7 Print at 100% scale, \u201cActual size\u201d / no fit-to-page`;
+}
+
+/* Build just the label grid (blanks + labels) for the current template/start. */
+function _labelSheetInner(){
+  const n = _labelsPerSheet();
+  if(_labelStartPos > n) _labelStartPos = 1;
+  const skip = _labelStartPos - 1;
+  const blanks = Array.from({length:skip}, () => `<div class="lbl lbl-blank"></div>`).join('');
+  const labels = _labelSheetList.map(_labelCell).join('');
+  return blanks + labels;
+}
+
 
 function _rerenderLabelSheet(){
   const scroll = document.getElementById('report-scroll');
@@ -2814,15 +2837,67 @@ function _rerenderLabelSheet(){
     if(rwrap){ rwrap.innerHTML = _buildLabelSheet(); }
   }
 }
+
+/* Surgical updates — never replace the <select> that fired the change event
+   (destroying it mid-event desyncs iOS Safari). Update only the dependent
+   pieces, deferred to the next tick so the change event fully settles first. */
+function _updateLabelStyle(){
+  const st = document.getElementById('label-style');
+  if(st) st.textContent = _computeLabelCSS();
+}
+function _updateLabelSheetGrid(){
+  const s = document.getElementById('label-sheet');
+  if(s) s.innerHTML = _labelSheetInner();
+}
+function _updateStartGrid(){
+  const g = document.getElementById('label-start-grid');
+  if(g) g.innerHTML = _labelStartGrid();
+}
+function _updateStartDropdown(){
+  const sel = document.getElementById('label-start-sel');
+  if(!sel) return;
+  const t = _tpl(), n = _labelsPerSheet();
+  let opts = '';
+  for(let p=1; p<=n; p++){
+    const r = Math.ceil(p/t.cols), c = ((p-1)%t.cols)+1;
+    opts += `<option value="${p}"${p===_labelStartPos?' selected':''}>Position ${p}  (row ${r}, col ${c})</option>`;
+  }
+  sel.innerHTML = opts;
+  sel.value = String(_labelStartPos);
+}
+function _updateLabelTexts(){
+  const note = document.getElementById('label-note');
+  if(note) note.innerHTML = _labelNote(_labelStartPos - 1);
+  const hint = document.getElementById('label-hint');
+  if(hint) hint.textContent = _labelHint();
+}
+
 function setLabelTemplate(k){
   if(!LABEL_TEMPLATES[k]) return;
   _labelTemplate = k;
   if(_labelStartPos > _labelsPerSheet()) _labelStartPos = 1;
-  _rerenderLabelSheet();
+  // Defer so the <select>'s own change event settles before we touch the DOM.
+  setTimeout(() => {
+    _updateLabelStyle();       // resize labels/grid for the new template
+    _updateStartDropdown();     // start positions depend on labels-per-sheet
+    _updateStartGrid();         // visual picker columns/count change
+    _updateLabelSheetGrid();    // re-lay the labels
+    _updateLabelTexts();        // note + hint
+    // keep the template select showing the chosen value
+    const tsel = document.getElementById('label-tpl-sel');
+    if(tsel) tsel.value = k;
+  }, 0);
 }
+
 function setLabelStart(pos){
   _labelStartPos = Math.min(_labelsPerSheet(), Math.max(1, pos || 1));
-  _rerenderLabelSheet();
+  setTimeout(() => {
+    _updateStartGrid();
+    _updateLabelSheetGrid();
+    _updateLabelTexts();
+    const ssel = document.getElementById('label-start-sel');
+    if(ssel) ssel.value = String(_labelStartPos);
+  }, 0);
 }
 
 
