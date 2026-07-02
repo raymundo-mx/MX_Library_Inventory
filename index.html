@@ -2422,7 +2422,8 @@ function closeReport(){
 }
 
 function printReport(){
-  // Print only the report by isolating it via the printing-report body class
+  if(isIOS()){ _printReportIOS(); return; }
+  // Desktop: isolate the report via the printing-report body class and print the page
   document.body.classList.add('printing-report');
   const cleanup = () => {
     document.body.classList.remove('printing-report');
@@ -2430,6 +2431,89 @@ function printReport(){
   };
   window.addEventListener('afterprint', cleanup);
   setTimeout(() => { window.print(); setTimeout(cleanup, 1500); }, 60);
+}
+
+/* iOS-reliable print: render the report/label document inside a VISIBLE,
+   full-screen iframe (its own isolated document, own @page CSS — no conflict
+   with the app's styles or the home-screen PWA web view). iOS renders and
+   prints a visible iframe correctly, unlike a hidden one or a swapped-DOM
+   page. A gold-on-black toolbar lets the user trigger Print or Close, since
+   iOS sometimes ignores an automatic print() call. */
+function _buildReportDocHTML(){
+  const pageRule = _lastReport.landscape ? '@page{size:landscape;margin:0.35in}' : '@page{margin:0.4in}';
+  // The report body may include its own <style> (labels). Reports rely on
+  // _reportCSS. We wrap the body in #report-scroll .rwrap so BOTH the global
+  // report CSS and the label CSS (scoped to #report-scroll) apply identically
+  // to how they render inside the on-screen overlay.
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${_lastReport.title}</title>${_reportFont}
+<style>
+  html,body{margin:0;padding:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  ${_reportCSS}
+  ${_scopedReportCSS()}
+  ${pageRule}
+  @media print{ .rwrap{padding:0 !important} }
+</style></head>
+<body class="printing-report">
+  <div id="report-scroll"><div class="rwrap">${_lastReport.body}</div></div>
+</body></html>`;
+}
+
+function _printReportIOS(){
+  const old = document.getElementById('ios-print-overlay');
+  if(old) old.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'ios-print-overlay';
+  Object.assign(overlay.style, {position:'fixed', inset:'0', zIndex:'120000', background:'#fff', display:'flex', flexDirection:'column'});
+
+  // Toolbar (gold on black), matching the app aesthetic
+  const bar = document.createElement('div');
+  Object.assign(bar.style, {flex:'0 0 auto', height:'54px', background:'#0d0d0f', color:'#e8c96a',
+    display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 14px',
+    font:"600 15px/1 'Source Sans 3',Arial,sans-serif", boxShadow:'0 1px 6px rgba(0,0,0,.4)'});
+  const label = document.createElement('span');
+  label.textContent = _lastReport.title || 'Ready to print';
+  label.style.overflow='hidden'; label.style.whiteSpace='nowrap'; label.style.textOverflow='ellipsis';
+  const btns = document.createElement('div');
+  btns.style.cssText='display:flex;gap:8px;flex:0 0 auto';
+  const printBtn = document.createElement('button');
+  printBtn.textContent = '🖨 Print';
+  printBtn.style.cssText = "font:700 15px 'Source Sans 3',Arial;background:#c9a84c;color:#0d0d0f;border:0;border-radius:7px;padding:9px 16px;cursor:pointer";
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '✕ Close';
+  closeBtn.style.cssText = "font:600 15px 'Source Sans 3',Arial;background:#2a2a2e;color:#e8c96a;border:1px solid #c9a84c;border-radius:7px;padding:9px 14px;cursor:pointer";
+  btns.appendChild(printBtn); btns.appendChild(closeBtn);
+  bar.appendChild(label); bar.appendChild(btns);
+
+  // Visible full-screen iframe holding the isolated document
+  const frame = document.createElement('iframe');
+  Object.assign(frame.style, {flex:'1 1 auto', width:'100%', border:'0', background:'#fff'});
+  frame.setAttribute('title', 'Print preview');
+
+  overlay.appendChild(bar);
+  overlay.appendChild(frame);
+  document.body.appendChild(overlay);
+
+  // Write the document into the iframe
+  const doc = frame.contentWindow.document;
+  doc.open(); doc.write(_buildReportDocHTML()); doc.close();
+
+  const doPrint = () => {
+    try {
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    } catch(e){
+      // Fallback: print the top window (iframe is visible, so content shows)
+      window.print();
+    }
+  };
+  printBtn.addEventListener('click', doPrint);
+  closeBtn.addEventListener('click', () => overlay.remove());
+
+  // Give the iframe a beat to lay out images/fonts before offering print.
+  // We do NOT auto-print (iOS often ignores it); the user taps Print.
 }
 
 /* Optional: still allow a real new-tab/window version for anyone who wants it. */
