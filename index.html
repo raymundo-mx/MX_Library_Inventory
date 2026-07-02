@@ -2286,7 +2286,7 @@ function printLabel(id){
   // free slot of a partially-used sheet to avoid waste.
   _labelSheetList = [b];
   _labelStartPos  = 1;
-  _labelTemplate  = '5160';
+  _labelTemplate  = '5167';
   _openReport('Print Label — ' + b.id, _buildLabelSheet());
 }
 
@@ -2650,7 +2650,7 @@ function profitLossReport(){
 /* ═══════════════════ AVERY 5160 LABEL SHEET (30/sheet) ═══════════════════ */
 let _labelSheetList = [];   // volumes queued for the current label sheet
 let _labelStartPos  = 1;    // 1-based position to begin printing at
-let _labelTemplate  = '5160';
+let _labelTemplate  = '5167';
 
 /* Avery templates. 5160 and 18167 are the SAME physical layout (2.625x1",
    30/sheet, 3x10) — 5160 is the laser part #, 18167 the inkjet equivalent.
@@ -2670,7 +2670,7 @@ function printLabelSheet(ids){
   if(!list.length){ toast('No volumes to print labels for.', 3000); return; }
   _labelSheetList = list;
   _labelStartPos  = 1;
-  _labelTemplate  = '5160';
+  _labelTemplate  = '5167';
   _openReport('Avery Label Sheet — MX Library', _buildLabelSheet());
 }
 
