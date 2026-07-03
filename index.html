@@ -2283,11 +2283,11 @@ function printLabel(id){
 
   // Route a single label through the full sheet screen so you can choose the
   // Avery template AND the start position — dropping this one label onto any
-  // free slot of a partially-used sheet to avoid waste.
+  // free slot of a partially-used sheet to avoid waste. Template & start
+  // position are remembered (localStorage) so a partially-used sheet can be
+  // worked through slot by slot across sessions.
   _labelSheetList = [b];
-  _labelStartPos  = 1;
-  _labelTemplate  = '5167';
-  _openReport('Print Label — ' + b.id, _buildLabelSheet());
+  _openReport('Print Label — ' + b.id, _buildLabelSheet(), {refresh:_buildLabelSheet});
 }
 
 /* Minimal Code 128-B barcode renderer → returns an inline SVG string.
@@ -2383,11 +2383,14 @@ function _scopedReportCSS(){
     });
 }
 
-let _lastReport = { title:'', body:'', landscape:false };
+let _lastReport = { title:'', body:'', landscape:false, refresh:null };
 
 function _openReport(title, bodyHtml, opts){
   opts = opts || {};
-  _lastReport = { title, body: bodyHtml, landscape: !!opts.landscape };
+  // opts.refresh: a function returning fresh body HTML. Used by the label
+  // sheet so the print document is REGENERATED at print time, honoring the
+  // current template/start-position selections instead of a stale snapshot.
+  _lastReport = { title, body: bodyHtml, landscape: !!opts.landscape, refresh: opts.refresh || null };
   // Ensure scoped styles are present once
   let styleEl = document.getElementById('report-scoped-style');
   if(!styleEl){
@@ -2440,6 +2443,10 @@ function printReport(){
    page. A gold-on-black toolbar lets the user trigger Print or Close, since
    iOS sometimes ignores an automatic print() call. */
 function _buildReportDocHTML(){
+  // Label sheets: rebuild from CURRENT state (template + start position) so
+  // the printed document matches the dropdown selections, not the snapshot
+  // taken when the overlay first opened.
+  if(_lastReport.refresh){ _lastReport.body = _lastReport.refresh(); }
   const pageRule = _lastReport.landscape ? '@page{size:landscape;margin:0.35in}' : '@page{margin:0.4in}';
   // The report body may include its own <style> (labels). Reports rely on
   // _reportCSS. We wrap the body in #report-scroll .rwrap so BOTH the global
@@ -2496,9 +2503,32 @@ function _printReportIOS(){
   overlay.appendChild(frame);
   document.body.appendChild(overlay);
 
-  // Write the document into the iframe
-  const doc = frame.contentWindow.document;
-  doc.open(); doc.write(_buildReportDocHTML()); doc.close();
+  // Write the document into the iframe. For label sheets, bridge the
+  // template / start-position handlers into the iframe's window so the
+  // dropdowns and the slot-picker grid WORK inside the print preview —
+  // the iframe is its own document and otherwise has no such functions.
+  const writeDoc = () => {
+    const doc = frame.contentWindow.document;
+    doc.open(); doc.write(_buildReportDocHTML()); doc.close();
+    if(_lastReport.refresh){
+      const w = frame.contentWindow;
+      // Defer the rewrite so the <select>'s change event fully settles
+      // before its document is destroyed (iOS Safari desync guard).
+      w.setLabelTemplate = (k) => {
+        if(!LABEL_TEMPLATES[k]) return;
+        _labelTemplate = k;
+        if(_labelStartPos > _labelsPerSheet()) _labelStartPos = 1;
+        _saveLabelPrefs();
+        setTimeout(writeDoc, 0);
+      };
+      w.setLabelStart = (pos) => {
+        _labelStartPos = Math.min(_labelsPerSheet(), Math.max(1, pos || 1));
+        _saveLabelPrefs();
+        setTimeout(writeDoc, 0);
+      };
+    }
+  };
+  writeDoc();
 
   const doPrint = () => {
     try {
@@ -2510,7 +2540,12 @@ function _printReportIOS(){
     }
   };
   printBtn.addEventListener('click', doPrint);
-  closeBtn.addEventListener('click', () => overlay.remove());
+  closeBtn.addEventListener('click', () => {
+    overlay.remove();
+    // If the user changed template/start inside the preview, re-render the
+    // underlying overlay so it matches the current selections.
+    if(_lastReport.refresh) _rerenderLabelSheet();
+  });
 
   // Give the iframe a beat to lay out images/fonts before offering print.
   // We do NOT auto-print (iOS often ignores it); the user taps Print.
@@ -2520,6 +2555,7 @@ function _printReportIOS(){
 function popOutReport(){
   const w = window.open('', '_blank');
   if(!w){ toast('Pop-up blocked — use Print / Save PDF instead.', 4000); return; }
+  if(_lastReport.refresh){ _lastReport.body = _lastReport.refresh(); }
   const pageRule = _lastReport.landscape ? '@page{size:landscape;margin:0.35in}' : '';
   w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${_lastReport.title}</title>${_reportFont}<style>${_reportCSS}${pageRule}</style></head><body>
     <div class="toolbar"><button onclick="window.print()">🖨 Print / Save PDF</button><button class="ghost" onclick="window.close()">Close</button></div>
@@ -2664,14 +2700,26 @@ const LABEL_TEMPLATES = {
 function _tpl(){ return LABEL_TEMPLATES[_labelTemplate] || LABEL_TEMPLATES['5160']; }
 function _labelsPerSheet(){ const t=_tpl(); return t.cols*t.rows; }
 
+/* Remember the chosen template + start slot across sessions so partially-
+   used sheets can be filled slot-by-slot without re-selecting every time. */
+(function _loadLabelPrefs(){
+  try{
+    const p = JSON.parse(localStorage.getItem('mxlib-label-prefs') || '{}');
+    if(p.template && LABEL_TEMPLATES[p.template]) _labelTemplate = p.template;
+    if(p.start) _labelStartPos = Math.min(_labelsPerSheet(), Math.max(1, parseInt(p.start)||1));
+  }catch(e){}
+})();
+function _saveLabelPrefs(){
+  try{ localStorage.setItem('mxlib-label-prefs',
+        JSON.stringify({template:_labelTemplate, start:_labelStartPos})); }catch(e){}
+}
+
 function printLabelSheet(ids){
   // ids: array of inventory IDs; default = all active volumes
   const list = (ids && ids.length ? ids.map(id => books.find(b=>b.id===id)).filter(Boolean) : books);
   if(!list.length){ toast('No volumes to print labels for.', 3000); return; }
   _labelSheetList = list;
-  _labelStartPos  = 1;
-  _labelTemplate  = '5167';
-  _openReport('Avery Label Sheet — MX Library', _buildLabelSheet());
+  _openReport('Avery Label Sheet — MX Library', _buildLabelSheet(), {refresh:_buildLabelSheet});
 }
 
 function _labelCell(b){
@@ -2680,14 +2728,19 @@ function _labelCell(b){
   const mono = window.MX_MONO_URI
     ? `<img class="lbl-mono" src="${window.MX_MONO_URI}" alt="">` : '';
 
-  // Tiny ½×1.75" label: only the essentials fit — brand micro-line, the
-  // inventory ID large, a slim barcode, and a small corner monogram.
+  // Tiny ½×1.75" label: same book info as the larger sizes, at micro scale —
+  // brand + ID line, single-line title, author/year + call number, slim barcode.
   if(t.size === 'tiny'){
     return `<div class="lbl lbl-tiny">
       ${mono}
       <div class="lbl-tiny-row">
         <span class="lbl-brand">MX LIBRARY</span>
         <span class="lbl-id">${esc(b.id)}</span>
+      </div>
+      <div class="lbl-title">${esc(b.title)}</div>
+      <div class="lbl-tiny-meta">
+        <span class="lbl-author">${esc(b.author||'')}${b.year?' \u00b7 '+b.year:''}</span>
+        ${call?`<span class="lbl-call">${esc(call)}</span>`:''}
       </div>
       <div class="lbl-bc">${code128SVG(b.id)}</div>
     </div>`;
@@ -2725,21 +2778,25 @@ function _computeLabelCSS(){
     : tiny
     ? `#report-scroll .lbl-mono{position:absolute;right:0.05in;bottom:0.04in;height:0.13in;opacity:.85}`
     : `#report-scroll .lbl-mono{position:absolute;right:0.10in;bottom:0.09in;height:0.26in;opacity:.9}`;
-  const titleSz = big ? '13px' : '8.5px';
-  const authSz  = big ? '11px' : '7.5px';
+  const titleSz = big ? '13px' : (tiny ? '6px' : '8.5px');
+  const authSz  = big ? '11px' : (tiny ? '5px' : '7.5px');
   const brandSz = big ? '9px'  : (tiny ? '5px' : '6.5px');
-  const idSz    = big ? '14px' : (tiny ? '8.5px' : '10px');
-  const callSz  = big ? '11px' : '8px';
-  const bcH     = big ? '30px' : (tiny ? '11px' : '16px');
+  const idSz    = big ? '14px' : (tiny ? '7.5px' : '10px');
+  const callSz  = big ? '11px' : (tiny ? '5px' : '8px');
+  const bcH     = big ? '30px' : (tiny ? '8px' : '16px');
   const lblPad  = big ? '0.14in 0.18in' : (tiny ? '0.03in 0.06in' : '0.08in 0.12in');
-  const titleMax= big ? '40px' : '20px';
+  const titleMax= big ? '40px' : (tiny ? '8px' : '20px');
   const padRight= big ? '1.0in' : (tiny ? '0.20in' : '0.62in');
 
   const tinyCss = tiny ? `
-    #report-scroll .lbl-tiny{justify-content:center;gap:0}
+    #report-scroll .lbl-tiny{justify-content:space-between;gap:0}
     #report-scroll .lbl-tiny-row{display:flex;align-items:baseline;justify-content:space-between;gap:4px}
     #report-scroll .lbl-tiny .lbl-brand{font-size:${brandSz};white-space:nowrap}
     #report-scroll .lbl-tiny .lbl-id{font-size:${idSz}}
+    #report-scroll .lbl-tiny .lbl-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:0;line-height:1.1}
+    #report-scroll .lbl-tiny-meta{display:flex;align-items:baseline;justify-content:space-between;gap:4px;min-width:0}
+    #report-scroll .lbl-tiny .lbl-author{flex:1;min-width:0}
+    #report-scroll .lbl-tiny .lbl-call{margin-top:0;padding:0 2px;white-space:nowrap;flex:0 0 auto;align-self:baseline}
   ` : '';
 
   return `
@@ -2876,6 +2933,7 @@ function setLabelTemplate(k){
   if(!LABEL_TEMPLATES[k]) return;
   _labelTemplate = k;
   if(_labelStartPos > _labelsPerSheet()) _labelStartPos = 1;
+  _saveLabelPrefs();
   // Defer so the <select>'s own change event settles before we touch the DOM.
   setTimeout(() => {
     _updateLabelStyle();       // resize labels/grid for the new template
@@ -2891,6 +2949,7 @@ function setLabelTemplate(k){
 
 function setLabelStart(pos){
   _labelStartPos = Math.min(_labelsPerSheet(), Math.max(1, pos || 1));
+  _saveLabelPrefs();
   setTimeout(() => {
     _updateStartGrid();
     _updateLabelSheetGrid();
