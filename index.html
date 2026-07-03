@@ -41,6 +41,9 @@ window.MX_MONO_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAANAAAACMCAYA
 </script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
+/* Prevent iOS Safari "font boosting" from inflating small text —
+   essential for the tiny 5167 label fonts to render at true size. */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 :root{
   /* ── Dark vault palette ── */
   --bg:#0a0a0a;
@@ -444,6 +447,7 @@ tr:hover td{background:var(--surface3)}
     </div>
     <div class="theme-toggle">
       <button class="theme-btn" onclick="cycleTheme()" id="theme-btn">🎨 <span id="theme-label">Dark</span></button>
+      <div id="app-version" style="font-size:9px;color:var(--muted);text-align:center;margin-top:4px;letter-spacing:.5px"></div>
     </div>
   </div>
 </div>
@@ -1759,6 +1763,14 @@ function updateStats(){
 /* ═══════════════════ THEME TOGGLE ═══════════════════ */
 const THEMES = ['dark','beige','burgundy'];
 const THEME_LABELS = {dark:'Dark', beige:'Beige', burgundy:'Burgundy'};
+
+/* Build version — bump on every deployment. Shown under the theme button so
+   a stale cached copy on iPhone is instantly obvious. */
+const APP_VERSION = 'v2026.07.02-b2';
+document.addEventListener('DOMContentLoaded', () => {
+  const v = document.getElementById('app-version');
+  if(v) v.textContent = APP_VERSION;
+});
 function applyTheme(t){
   document.body.classList.remove('theme-beige','theme-burgundy');
   if(t === 'beige')    document.body.classList.add('theme-beige');
@@ -2456,7 +2468,7 @@ function _buildReportDocHTML(){
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${_lastReport.title}</title>${_reportFont}
 <style>
-  html,body{margin:0;padding:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  html,body{margin:0;padding:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;-webkit-text-size-adjust:100%;text-size-adjust:100%}
   ${_reportCSS}
   ${_scopedReportCSS()}
   ${pageRule}
